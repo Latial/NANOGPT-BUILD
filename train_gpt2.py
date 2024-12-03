@@ -1,7 +1,19 @@
+import math
 from dataclasses import dataclass
 import torch;
 import torch.nn as nn
 from torch.nn import functional as F
+
+#MLP Block - we have two linear projections that are sandwiched between gelu nonlinearity. Gelu is like a relu except there is no flat tail with exactly 0. 
+#We use the exact version over approximate version. BUT GTP-2 USES APROXIMATE VERSION. We use Gelu over relu bcs if the tail is exactly 0 the changes that follow will get 0 gradient.
+#There is no change or development of network if its flat but the gelu always contributes local gradient so there will always be a change.
+
+class MLP(nn.Module):
+    def __init__(self,config):
+        super().__init__
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
+        self.gelu = nn.GELU(approximate = 'tahn')
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
 
 class Block(nn.Module):
     #initalization
