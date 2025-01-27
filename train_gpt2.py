@@ -108,6 +108,40 @@ class GPT(nn.Module):
             ln_f = nn.LayerNorm(config.n_embd), #final Layer norm
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias = False) #final classifier layer model head that projects from embedding dimensions to vocab_size
+
+    #Thi is the forward pass of the network
+    def forward(self, idx):
+        #idx - token indices
+        # idx is of shape(B,T)
+        B, T = idx.size
+        assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is {self.config.block_size}"
+        #forward the token and position embeddings
+        #we use range and iterating from 0 to T and creating pos(position) indices and we are making sure they are the same device as idx because we are not going to train on only CPU we want to be training on GPU
+        pos = torch.arange(T, dtype=torch.long, device=idx.device) #shape (T)
+        pos_emb = self.transformer.wpe(pos) #position embeddings of shape (T, n_embd)
+        tok_emb = self.transformer.wte(idx) #token embeddings of shape (B, n_embd)
+        x = tok_emb + pos_emb
+        #forward the blocks of the transformer
+        for block in self.transformer.h:
+            x = block(x)
+        # Apply the final layer normalization to the residual stream (x).
+        # Layer normalization stabilizes the distribution of features by normalizing
+        # the input across its feature dimension, ensuring consistent scale and mean.
+        # This prepares the output for the next stage (e.g., the projection head) by
+        # improving numerical stability and model performance.
+        x = self.transformer.ln_f(x)
+        # Calculate the logits for the next token in the sequence.
+        # If the input has a shape (B, T) — where B is the batch size and T is the sequence length —
+        # the logits tensor will have a shape (B, T, vocab_size), representing the predicted scores
+        # for each possible token in the vocabulary at each position in the sequence.
+        # Logits are raw, unnormalized scores and can be converted into probabilities
+        # by applying a softmax function.
+        #logits. If the input was B by T indices, then every single B by T we will calculate the logits for what token comes next in the sequence.
+        #vocab_size is the number of possible tokens so this is a tenser that we are going to obtain. Logits are just a softmax away from becoming probabilist
+        logits = self.lm_head(x) # B, T, vocab_size
+        return logits
+
+
     @classmethod
     def from_pretrained(cls, model_type):
         """Loads pretrained GPT model weights from huggingface"""
@@ -153,5 +187,18 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
+
+num_return_sequences = 5
+max_length = 30
+
 model = GPT.from_pretrained('gpt2')
-print("No crashes, cheer :D")
+model.eval() #This is a good practice when you are not going to train it but use the model. But here maybe it's not doing anything right now as our model doesn't contain modules or layers that have different behavior in training or evaluation time
+model.to('cuda') #Moving the model to cuda. Moving all the tensors to GPU. Sshed here to a cloud box and there are a bunch of GPU on the box. And here we are moving to a whole separated computer sitting on a GPU and GPU is connected to CPU. It is well catered to parallel processing tasks.
+
+#prefix tokens
+import tiktoken
+enc = tiktoken.get_encoding('gpt2')
+tokens = enc.encode("Hello, I'm a language model,")
+tokens = torch.tensor(tokens, dtype=torch.long) # We get 8 tokens
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) #We get 5 rows of 8 tokens (5,8)
+x = tokens.to('cuda')
